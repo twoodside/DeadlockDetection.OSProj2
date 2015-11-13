@@ -1,4 +1,4 @@
-package deadlockdetection.osproj2;
+package deadlockdetection_osproj2;
 
 import java.lang.IndexOutOfBoundsException;
 
