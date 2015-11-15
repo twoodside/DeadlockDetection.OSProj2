@@ -8,8 +8,6 @@ import java.util.TreeSet;
 
 public class DeadlockDetectionOSProj2 {
 
-    static int numBlocks;
-    
     public static void main(String[] args) {
         Scanner in = new Scanner(System.in);
         int numProcesses=in.nextInt();
@@ -27,8 +25,7 @@ public class DeadlockDetectionOSProj2 {
             
             simulate(numResources,instructionList);
             
-            System.out.println(numBlocks+"\n");
-            numBlocks=0;
+            System.out.println();
             
             numProcesses=in.nextInt();
             numResources=in.nextInt();
@@ -36,7 +33,7 @@ public class DeadlockDetectionOSProj2 {
     }
     
     private static void simulate(int numResources, LinkedList<Instruction>[] instructionList) {
-        int executionCycles=-1;
+        int executionCycles=0;
         boolean deadlocked=false;
         //Determines if a resource is held by any process
         boolean[] held = new boolean[numResources];
@@ -50,7 +47,11 @@ public class DeadlockDetectionOSProj2 {
         //Print queue
         PrintWriter processFinishedQueue = new PrintWriter(System.out);
         
+        //The runtime for each process
         int[] runtime = new int[instructionList.length];
+        for (int i=0;i<runtime.length;i++){
+            runtime[i]=1;
+        }
         
         //Queues for each resource when a process has to block
         LinkedList<Integer>[] requestingAccess = new LinkedList[numResources];
@@ -64,21 +65,18 @@ public class DeadlockDetectionOSProj2 {
             readyQueue.add(i);
         }
         
-        while (!deadlocked && !readyQueue.isEmpty()){
+        while (!deadlocked && !(readyQueue.isEmpty() && !allBlocked(blocked) )){
             int processNumber=readyQueue.pop();
             
             if (blocked[processNumber]==true || instructionList[processNumber].peek()==null){
                 continue;
             }
-            executionCycles++;
-            runtime[processNumber]++;
+            
             Instruction currInst = instructionList[processNumber].pop();
 
             if (currInst.type==1){
                 if (!requestResource(currInst.value,processNumber,blocked,held,requests,requestingAccess)){
-                    executionCycles--;
                     instructionList[processNumber].addFirst(currInst);
-                    continue;
                 }
                 LinkedList<Edge> results = hasCycle(requests, createVisitedMatrix(requests),processNumber, currInst.value, true);
 
@@ -96,9 +94,12 @@ public class DeadlockDetectionOSProj2 {
                 processFinishedQueue.write(
                         String.format("Process %d: run time = %d, ended at %d\n",processNumber+1,runtime[processNumber],executionCycles)
                         );
+                executionCycles++;
             }
             else if (!blocked[processNumber]){
                 readyQueue.add(processNumber);
+                executionCycles++;
+                runtime[processNumber]++;
             }
         }
         if (!deadlocked){
@@ -262,7 +263,6 @@ public class DeadlockDetectionOSProj2 {
         
         requests[process][resource]=true;
         if (held[resource]){
-            numBlocks++;
             requestingAccess[resource].add(process);
             r=false;
             blocked[process]=true;
@@ -300,6 +300,17 @@ public class DeadlockDetectionOSProj2 {
            System.out.printf(" %s",i);
        }
        System.out.println();
+    }
+
+    private static boolean allBlocked(boolean[] blocked) {
+        boolean r=true;
+        for (int i=0;i<blocked.length;i++){
+            if (!blocked[i]){
+                r=false;
+                break;
+            }
+        }
+        return r;
     }
 }
 
