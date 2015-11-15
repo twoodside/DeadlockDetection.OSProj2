@@ -1,19 +1,24 @@
 package deadlockdetection_osproj2;
 
+import java.io.PrintWriter;
 import java.util.LinkedList;
+import java.util.NoSuchElementException;
 import java.util.Scanner;
+import java.util.TreeSet;
 
 public class DeadlockDetectionOSProj2 {
 
+    static int numBlocks;
+    
     public static void main(String[] args) {
         Scanner in = new Scanner(System.in);
-        int numProcesses=-1;
-        int numResources=-1;
+        int numProcesses=in.nextInt();
+        int numResources=in.nextInt();
+        int simulation = 0;
         
         while (numProcesses!=0 && numResources!=0){
+            System.out.printf("Simulation %d\n",++simulation);
             
-            numProcesses=in.nextInt();
-            numResources=in.nextInt();
             LinkedList<Instruction>[] instructionList = new LinkedList[numProcesses];
             
             loadProcessInstructions(instructionList,in);
@@ -21,46 +26,84 @@ public class DeadlockDetectionOSProj2 {
             //printProcessContents(instructionList);
             
             simulate(numResources,instructionList);
+            
+            System.out.println(numBlocks+"\n");
+            numBlocks=0;
+            
+            numProcesses=in.nextInt();
+            numResources=in.nextInt();
         }
     }
     
     private static void simulate(int numResources, LinkedList<Instruction>[] instructionList) {
-        int executionCycles=0;
+        int executionCycles=-1;
+        boolean deadlocked=false;
         //Determines if a resource is held by any process
         boolean[] held = new boolean[numResources];
-
+        
         //Determines requests/ownership of resources by processes. If requests[p][r] is true, process p either requests or owns resource r
         boolean[][] requests = new boolean[instructionList.length][numResources];
-
+        
+        //Block state of each process
+        boolean[] blocked = new boolean[instructionList.length];
+        
+        //Print queue
+        PrintWriter processFinishedQueue = new PrintWriter(System.out);
+        
+        int[] runtime = new int[instructionList.length];
+        
         //Queues for each resource when a process has to block
         LinkedList<Integer>[] requestingAccess = new LinkedList[numResources];
         for (int i=0;i<requestingAccess.length;i++){
             requestingAccess[i] = new LinkedList();
         }
         
-        while (!processesFinished(instructionList)){
-            for (int processNumber=0;processNumber<instructionList.length;processNumber++){
-                if (instructionList[processNumber]==null){
+        //Which process is to run next
+        LinkedList<Integer> readyQueue = new LinkedList();
+        for (int i=0;i<instructionList.length;i++){
+            readyQueue.add(i);
+        }
+        
+        while (!deadlocked && !readyQueue.isEmpty()){
+            int processNumber=readyQueue.pop();
+            
+            if (blocked[processNumber]==true || instructionList[processNumber].peek()==null){
+                continue;
+            }
+            executionCycles++;
+            runtime[processNumber]++;
+            Instruction currInst = instructionList[processNumber].pop();
+
+            if (currInst.type==1){
+                if (!requestResource(currInst.value,processNumber,blocked,held,requests,requestingAccess)){
+                    executionCycles--;
+                    instructionList[processNumber].addFirst(currInst);
                     continue;
                 }
-                executionCycles++;
-                Instruction currInst = instructionList[processNumber].pop();
-                
-                if (currInst.type==1){
-                    if (!requestResource(currInst.value,processNumber,held,requests,requestingAccess)){
-                        executionCycles--;
-                    }
-                    
-                    if  ( 
-                            hasCycle(requests, createVisitedMatrix(requests),processNumber, currInst.value, true)
-                        ){
-                        System.out.println("Deadlocked at ");
-                    }
-                }
-                else if (currInst.type==2){
-                    
+                LinkedList<Edge> results = hasCycle(requests, createVisitedMatrix(requests),processNumber, currInst.value, true);
+
+                if  (results!=null){
+                    System.out.printf("Deadlock detected at time %d involving...\n",executionCycles);
+                    printEdges(results);
+                    deadlocked=true;
                 }
             }
+            else if (currInst.type==2){
+                releaseResource(currInst.value,processNumber,blocked,held,requests,requestingAccess,readyQueue);
+            }
+
+            if (instructionList[processNumber].isEmpty()){
+                processFinishedQueue.write(
+                        String.format("Process %d: run time = %d, ended at %d\n",processNumber+1,runtime[processNumber],executionCycles)
+                        );
+            }
+            else if (!blocked[processNumber]){
+                readyQueue.add(processNumber);
+            }
+        }
+        if (!deadlocked){
+            System.out.printf("All processes successfully terminated.\n");
+            processFinishedQueue.flush();
         }
     }
     
@@ -78,23 +121,6 @@ public class DeadlockDetectionOSProj2 {
         }
     }
     
-    /**
-     * @return True if request successful, false if resource had to block
-     */
-    private static boolean requestResource(int resource, int process, boolean[] held, boolean[][] requests, LinkedList<Integer>[] requestingAccess){
-        boolean r=true;
-        resource--;
-        requests[process][resource]=true;
-        if (held[resource]){
-            requestingAccess[resource].add(process);
-            r=false;
-        }
-        else{
-            held[resource]=true;
-        }
-        return r;
-    }
-
     private static void loadProcessInstructions(LinkedList<Instruction>[] instructionList,Scanner in) {
         for (int i=0;i<instructionList.length;i++){
             instructionList[i]=new LinkedList();
@@ -103,11 +129,13 @@ public class DeadlockDetectionOSProj2 {
                 try{
                     int instType = in.nextInt();
                     int instValue = in.nextInt();
+                    
                     while (instType==3 && instValue>1){
                         Instruction temp = new Instruction(3,1);
                         instructionList[i].add(temp);
                         instValue--;
                     }
+                    
                     Instruction temp = new Instruction(instType,instValue);
                     instructionList[i].add( temp );
                 }
@@ -122,7 +150,7 @@ public class DeadlockDetectionOSProj2 {
     private static boolean processesFinished(LinkedList<Instruction>[] instructionList) {
         boolean r=true;
         for (int i=0;i<instructionList.length;i++){
-            if (instructionList[i]!=null){
+            if (instructionList[i].peek()!=null){
                 r=false;
                 break;
             }
@@ -144,7 +172,7 @@ public class DeadlockDetectionOSProj2 {
         boolean[][] visited = new boolean[requests.length][requests[0].length];
         
         for (int p=0;p<requests.length;p++){
-            for (int r=0;r<requests.length;r++){
+            for (int r=0;r<requests[p].length;r++){
                 visited[p][r]=false;
             }
         }
@@ -152,25 +180,17 @@ public class DeadlockDetectionOSProj2 {
         return visited;
     }
     
-    /**
-     * Needs to account for directional stuff. Should only be able to go from Process to resource if it's held(?) and from resource to process if requested (held?)
-     * @param requests
-     * @param visited
-     * @param p
-     * @param r
-     * @param checkingResources
-     * @return 
-     */
-    private static boolean hasCycle(boolean[][] requests, boolean[][] visited, int p, int r,boolean checkingResources) {
-        //visited[p][r]=true;
+    private static LinkedList<Edge> hasCycle(boolean[][] requests, boolean[][] visited, int p, int r,boolean checkingResources) {
         
         if (visited[p][r]==true){
-            return true;
+            LinkedList<Edge> ret = new LinkedList();
+            ret.add(new Edge(p,r));
+            return ret;
         }
         
         visited[p][r]=true;
         
-        boolean ret=false;
+        LinkedList<Edge> ret=null;
         
         if (!checkingResources){
             
@@ -180,9 +200,10 @@ public class DeadlockDetectionOSProj2 {
                 
                 
                 if (requests[p][i]==true){
-                    boolean hasSubCycle=hasCycle(requests,visited,p,i,!checkingResources);
-                    if (hasSubCycle){
-                        ret=true;
+                    LinkedList<Edge> subCycleContents=hasCycle(requests,visited,p,i,!checkingResources);
+                    if (subCycleContents!=null){
+                        ret=subCycleContents;
+                        ret.add(new Edge(p,r));
                         break;
                     }
                 }
@@ -195,9 +216,10 @@ public class DeadlockDetectionOSProj2 {
                 
                 
                 if (requests[i][r]==true){
-                    boolean hasSubCycle=hasCycle(requests,visited,i,r,!checkingResources);
-                    if (hasSubCycle){
-                        ret=true;
+                    LinkedList<Edge> subCycleContents=hasCycle(requests,visited,i,r,!checkingResources);
+                    if (subCycleContents!=null){
+                        ret=subCycleContents;
+                        ret.add(new Edge(p,r));
                         break;
                     }
                 }
@@ -206,4 +228,79 @@ public class DeadlockDetectionOSProj2 {
         
         return ret;
     }
+
+    /*
+     * @return True if release left resource free, false if resource was obtained by process from the queue
+     */
+    private static boolean releaseResource(int resourceNumber, int processNumber, boolean[] blocked, boolean[] held, boolean[][] requests, LinkedList<Integer>[] requestingAccess,LinkedList<Integer> readyQueue) {
+        boolean r = true;
+        
+        requests[processNumber][resourceNumber]=false;
+        held[resourceNumber]=false;
+        
+        try{
+            Integer requestingProcess = requestingAccess[resourceNumber].pop();
+            if (requestingProcess!=null){
+                blocked[requestingProcess]=false;
+                readyQueue.add(requestingProcess);
+                r=false;
+            }
+        }
+        catch (NoSuchElementException e){
+            //No processes requesting the resource
+            r=true;
+        }
+        
+        return r;
+    }
+    
+    /**
+     * @return True if request successful, false if resource had to block
+     */
+    private static boolean requestResource(int resource, int process, boolean[] blocked, boolean[] held, boolean[][] requests, LinkedList<Integer>[] requestingAccess){
+        boolean r=true;
+        
+        requests[process][resource]=true;
+        if (held[resource]){
+            numBlocks++;
+            requestingAccess[resource].add(process);
+            r=false;
+            blocked[process]=true;
+        }
+        else{
+            held[resource]=true;
+        }
+        return r;
+    }
+
+    private static void printEdges(LinkedList<Edge> edgeList) {
+    /*    System.out.println("\tProcess/Resource pairs involved:");
+        while (!edgeList.isEmpty()){
+            System.out.printf("\t%s\n",edgeList.pop());
+        }
+        */
+        
+       TreeSet<Integer> processList = new TreeSet<>();
+       TreeSet<Integer> resourceList = new TreeSet<>();
+       
+       while (!edgeList.isEmpty()){
+           Edge item = edgeList.pop();
+           processList.add(item.process+1);
+           resourceList.add(item.resource+1);
+       }
+       
+       System.out.print("\tprocesses:");
+       for (Integer i : processList.toArray(new Integer[processList.size()])){
+           System.out.printf(" %s",i);
+       }
+       System.out.println();
+       
+       System.out.print("\tresources:");
+       for (Integer i : resourceList.toArray(new Integer[resourceList.size()])){
+           System.out.printf(" %s",i);
+       }
+       System.out.println();
+    }
 }
+
+
